@@ -85,6 +85,14 @@ st.markdown("""
         margin: 1rem 0;
     }
     
+    .success-card {
+        background: #2d2d2d;
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 4px solid #28a745;
+        margin: 1rem 0;
+    }
+    
     .status-card {
         background: #2d2d2d;
         padding: 1rem;
@@ -107,6 +115,22 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(79, 211, 199, 0.3);
+    }
+    
+    /* Botão verde para "Ver Arquivos" */
+    .success-button {
+        background: linear-gradient(45deg, #28a745, #20c997) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 0.5rem 2rem !important;
+        font-weight: bold !important;
+        transition: all 0.3s !important;
+    }
+    
+    .success-button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3) !important;
     }
     
     /* Console/Log estilo ARTEMEC */
@@ -145,6 +169,17 @@ st.markdown("""
         color: #cccccc;
         font-size: 0.9rem;
     }
+    
+    /* Animação de sucesso */
+    .processing-complete {
+        animation: pulse 2s ease-in-out;
+    }
+    
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -159,6 +194,10 @@ if 'processing_results' not in st.session_state:
     st.session_state.processing_results = []
 if 'console_logs' not in st.session_state:
     st.session_state.console_logs = []
+if 'processing_completed' not in st.session_state:
+    st.session_state.processing_completed = False
+if 'processed_files' not in st.session_state:
+    st.session_state.processed_files = []
 
 def add_log(message: str, level: str = "info"):
     """Adiciona mensagem ao console"""
@@ -229,6 +268,95 @@ def load_images_from_directory():
         add_log(f"❌ Erro ao carregar imagens: {e}", "error")
         return []
 
+def simulate_processing(images):
+    """Simula o processamento das imagens"""
+    processed_files = []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, image in enumerate(images):
+        progress = (i + 1) / len(images)
+        progress_bar.progress(progress)
+        status_text.text(f"Processando {image.name}... ({i+1}/{len(images)})")
+        
+        add_log(f"📷 Processando: {image.name}", "info")
+        
+        # Simula processamento
+        time.sleep(0.8)
+        
+        # Simula resultado do processamento
+        result = {
+            'arquivo': image.name,
+            'fabricante': f'Fabricante {i+1}',
+            'categoria': ['I', 'II', 'III'][i % 3],
+            'completude': 85.0 + (i * 3) % 15,  # Entre 85-100%
+            'identificacao': f'TAG-{i+1:03d}',
+            'pressao_maxima_trabalho': f'{14 + i % 3}.5 kgf/cm²',
+            'timestamp': datetime.now().isoformat()
+        }
+        processed_files.append(result)
+    
+    status_text.text("✅ Processamento concluído!")
+    progress_bar.progress(1.0)
+    
+    return processed_files
+
+def show_processed_files():
+    """Mostra arquivos processados"""
+    if st.session_state.processed_files:
+        st.markdown("### 📁 Arquivos Processados")
+        
+        # Converte para DataFrame
+        df = pd.DataFrame(st.session_state.processed_files)
+        
+        # Mostra tabela
+        st.dataframe(df, use_container_width=True)
+        
+        # Estatísticas
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        
+        with col_stat1:
+            st.metric("Total Processado", len(df))
+        
+        with col_stat2:
+            avg_completude = df['completude'].mean()
+            st.metric("Completude Média", f"{avg_completude:.1f}%")
+        
+        with col_stat3:
+            valid_count = len(df[df['completude'] >= 90])
+            st.metric("Válidos (≥90%)", valid_count)
+        
+        # Gráfico de completude
+        fig = px.bar(df, x='arquivo', y='completude', 
+                   title='📊 Completude por Arquivo',
+                   color='completude',
+                   color_continuous_scale='RdYlGn',
+                   range_color=[0, 100])
+        
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font_color='white',
+            xaxis_title="Arquivo",
+            yaxis_title="Completude (%)"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Botão para baixar resultados
+        if st.button("💾 Baixar Resultados (JSON)"):
+            json_str = json.dumps(st.session_state.processed_files, 
+                                indent=2, ensure_ascii=False)
+            st.download_button(
+                label="📥 Download JSON",
+                data=json_str,
+                file_name=f"resultados_ocr_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json"
+            )
+    else:
+        st.info("Nenhum arquivo processado ainda.")
+
 def main():
     """Função principal da GUI"""
     
@@ -249,6 +377,9 @@ def main():
         # Botão para atualizar lista
         if st.button("🔄 Atualizar Lista", key="refresh_images"):
             st.session_state.images = load_images_from_directory()
+            # Reset do estado de processamento se novas imagens
+            if st.session_state.images:
+                st.session_state.processing_completed = False
         
         # Carrega imagens se não existirem
         if not st.session_state.images:
@@ -282,12 +413,18 @@ def main():
             modo = "BATCH" if num_images > settings.BATCH_THRESHOLD else "SYNC"
             economia = "50% de desconto" if modo == "BATCH" else "Processamento rápido"
             
+            # Card de status - muda cor após processamento
+            card_class = "success-card processing-complete" if st.session_state.processing_completed else "info-card"
+            status_icon = "✅" if st.session_state.processing_completed else "📊"
+            status_title = "Processamento Concluído!" if st.session_state.processing_completed else "Modo Híbrido Inteligente"
+            
             st.markdown(f"""
-            <div class="info-card">
-                <h4>📊 Modo Híbrido Inteligente</h4>
+            <div class="{card_class}">
+                <h4>{status_icon} {status_title}</h4>
                 <p><strong>Imagens encontradas:</strong> {num_images}</p>
                 <p><strong>Modo selecionado:</strong> {modo}</p>
                 <p><strong>Vantagem:</strong> {economia}</p>
+                {f'<p><strong>Arquivos processados:</strong> {len(st.session_state.processed_files)}</p>' if st.session_state.processing_completed else ''}
             </div>
             """, unsafe_allow_html=True)
             
@@ -295,23 +432,28 @@ def main():
             col_btn1, col_btn2 = st.columns(2)
             
             with col_btn1:
-                if st.button("🚀 Processar Todas", disabled=not st.session_state.images):
-                    add_log("🚀 Iniciando processamento de todas as imagens...", "info")
-                    
-                    # Simula processamento
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    for i, image in enumerate(st.session_state.images):
-                        progress = (i + 1) / len(st.session_state.images)
-                        progress_bar.progress(progress)
-                        status_text.text(f"Processando {image.name}...")
+                # Botão muda após processamento
+                if not st.session_state.processing_completed:
+                    # Botão normal de processar
+                    if st.button("🚀 Processar Todas", disabled=not st.session_state.images):
+                        add_log("🚀 Iniciando processamento de todas as imagens...", "info")
                         
-                        add_log(f"📷 Processando: {image.name}", "info")
-                        time.sleep(0.5)  # Simula processamento
-                    
-                    add_log("✅ Processamento concluído com sucesso!", "success")
-                    status_text.text("✅ Processamento concluído!")
+                        # Processa imagens
+                        processed_files = simulate_processing(st.session_state.images)
+                        
+                        # Salva resultados
+                        st.session_state.processed_files = processed_files
+                        st.session_state.processing_completed = True
+                        
+                        add_log(f"✅ Processamento concluído! {len(processed_files)} arquivos processados", "success")
+                        
+                        # Força refresh da página para mostrar mudanças
+                        st.rerun()
+                else:
+                    # Botão verde para ver arquivos processados
+                    if st.button("📁 Ver Arquivos Processados", key="view_processed"):
+                        # Mostra modal ou expandir seção com arquivos
+                        st.session_state.show_processed_modal = True
             
             with col_btn2:
                 if st.button("🎯 Processar Selecionada", disabled=st.session_state.selected_image is None):
@@ -323,6 +465,11 @@ def main():
                             time.sleep(2)  # Simula processamento
                         
                         add_log("✅ Processamento da imagem concluído!", "success")
+            
+            # Mostra arquivos processados se botão foi clicado
+            if st.session_state.processing_completed and 'show_processed_modal' in st.session_state:
+                if st.session_state.show_processed_modal:
+                    show_processed_files()
             
             # Preview da imagem selecionada
             if st.session_state.selected_image is not None:
@@ -337,31 +484,34 @@ def main():
         with tab2:
             st.markdown("### 📊 Resultados do Processamento")
             
-            # Simula alguns resultados
-            if st.button("📋 Carregar Últimos Resultados"):
-                add_log("📋 Carregando resultados salvos...", "info")
-                
-                # Dados simulados
-                sample_results = [
-                    {"arquivo": "placa_001.jpg", "fabricante": "ACME Corp", "categoria": "I", "completude": 95.0},
-                    {"arquivo": "placa_002.jpg", "fabricante": "TechSteel", "categoria": "II", "completude": 88.5},
-                    {"arquivo": "placa_003.jpg", "fabricante": "MetalWorks", "categoria": "I", "completude": 92.3},
-                ]
-                
-                df = pd.DataFrame(sample_results)
-                st.dataframe(df, use_container_width=True)
-                
-                # Gráfico de completude
-                fig = px.bar(df, x='arquivo', y='completude', 
-                           title='Completude dos Resultados (%)',
-                           color='completude',
-                           color_continuous_scale='Turbo')
-                fig.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    font_color='white'
-                )
-                st.plotly_chart(fig, use_container_width=True)
+            if st.session_state.processing_completed and st.session_state.processed_files:
+                show_processed_files()
+            else:
+                # Simula alguns resultados para demonstração
+                if st.button("📋 Carregar Últimos Resultados"):
+                    add_log("📋 Carregando resultados salvos...", "info")
+                    
+                    # Dados simulados
+                    sample_results = [
+                        {"arquivo": "placa_001.jpg", "fabricante": "ACME Corp", "categoria": "I", "completude": 95.0},
+                        {"arquivo": "placa_002.jpg", "fabricante": "TechSteel", "categoria": "II", "completude": 88.5},
+                        {"arquivo": "placa_003.jpg", "fabricante": "MetalWorks", "categoria": "I", "completude": 92.3},
+                    ]
+                    
+                    df = pd.DataFrame(sample_results)
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Gráfico de completude
+                    fig = px.bar(df, x='arquivo', y='completude', 
+                               title='Completude dos Resultados (%)',
+                               color='completude',
+                               color_continuous_scale='Turbo')
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        font_color='white'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
         
         with tab3:
             st.markdown("### ⚙️ Configurações do Sistema")
@@ -411,17 +561,24 @@ def main():
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
             
             with col_m1:
-                st.markdown("""
+                total_processed = len(st.session_state.processed_files)
+                st.markdown(f"""
                 <div class="metric-container">
-                    <div class="metric-value">127</div>
+                    <div class="metric-value">{total_processed}</div>
                     <div class="metric-label">Imagens Processadas</div>
                 </div>
                 """, unsafe_allow_html=True)
             
             with col_m2:
-                st.markdown("""
+                if st.session_state.processed_files:
+                    avg_completude = sum(f['completude'] for f in st.session_state.processed_files) / len(st.session_state.processed_files)
+                    success_rate = f"{avg_completude:.1f}%"
+                else:
+                    success_rate = "94.2%"
+                    
+                st.markdown(f"""
                 <div class="metric-container">
-                    <div class="metric-value">94.2%</div>
+                    <div class="metric-value">{success_rate}</div>
                     <div class="metric-label">Taxa de Sucesso</div>
                 </div>
                 """, unsafe_allow_html=True)
