@@ -5,6 +5,7 @@ Utils - Utilitários e funções auxiliares
 import os
 import sys
 import time
+import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
