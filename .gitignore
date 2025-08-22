@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+_outros/
+deprecated/
+samples_imagens/
+
+# Environment
+.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific
+input/*
+!input/.gitkeep
+output/json/*
+!output/json/.gitkeep
+output/batch/*
+!output/batch/.gitkeep
+output/reports/*
+!output/reports/.gitkeep
+logs/*
+!logs/.gitkeep
+data/*.json
+!data/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backups
+*.bak
+*.backup
+*_old.*
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Test files
+test_images/
+*.test

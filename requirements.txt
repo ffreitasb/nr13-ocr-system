@@ -1,0 +1,29 @@
+# Core dependencies
+mistralai>=1.0.0
+python-dotenv>=1.0.0
+
+# Data processing
+pyyaml>=6.0
+Pillow>=10.0.0
+
+# Utilities
+tqdm>=4.66.0
+
+# Optional: GUI (uncomment if needed)
+# streamlit>=1.28.0
+# plotly>=5.0.0
+
+# Optional: Export features (uncomment if needed)
+# openpyxl>=3.1.0
+# fpdf2>=2.7.0
+# reportlab>=4.0.0
+
+# Optional: Enhanced OCR (uncomment if needed)
+# opencv-python>=4.8.0
+# pytesseract>=0.3.10
+
+# Development dependencies (uncomment for development)
+# pytest>=7.0.0
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.0.0
