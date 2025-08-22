@@ -1,1 +1,565 @@
-#!/usr/bin/env python3\n\"\"\"\nSistema OCR para Placas NR-13\nEntry point principal\n\"\"\"\nimport sys\nimport json\nimport os\nfrom pathlib import Path\n\n# Adiciona diretório raiz ao path para imports\nproject_root = Path(__file__).parent.absolute()\nsys.path.insert(0, str(project_root))\n\n# Agora importa os módulos do projeto\ntry:\n    from config.settings import settings\n    from ocr.processor import OCRProcessor\n    from ocr.models import PlacaNR13\n    from services import BatchManager\n    from utils import (\n        get_logger, print_banner, print_summary, ask_confirmation,\n        validate_nr13_result, format_time, get_system_info\n    )\nexcept ImportError as e:\n    print(f\"❌ Erro ao importar módulos: {e}\")\n    print(\"\\n🔧 Soluções possíveis:\")\n    print(\"1. Verifique se está no diretório correto do projeto\")\n    print(\"2. Execute: pip install -r requirements.txt\")\n    print(\"3. Ative o ambiente virtual se estiver usando\")\n    print(\"4. Verifique se todos os arquivos .py estão presentes\")\n    print(f\"5. Diretório atual: {Path.cwd()}\")\n    print(f\"6. Diretório do projeto: {Path(__file__).parent.absolute()}\")\n    sys.exit(1)\n\nlogger = get_logger(__name__)\n\n\ndef print_menu():\n    \"\"\"Imprime menu principal\"\"\"\n    print(f\"\\n📊 Modo Híbrido Inteligente:\")\n    print(f\"   • 1-{settings.BATCH_THRESHOLD}: Processamento Síncrono\")\n    print(f\"   • >{settings.BATCH_THRESHOLD}: Batch API (50% desconto)\")\n    print(\"\\n\" + \"-\"*60)\n    print(\"\\n1. Processar imagens (automático)\")\n    print(\"2. Processar imagem específica\")\n    print(\"3. Validar JSONs processados\")\n    print(\"4. Ver histórico de jobs batch\")\n    print(\"5. Ver relatórios\")\n    print(\"6. Configurações\")\n    print(\"7. Teste de conexão\")\n    print(\"8. Estatísticas\")\n    print(\"9. Sair\")\n    print(\"-\"*60)\n\n\ndef check_project_structure():\n    \"\"\"Verifica se a estrutura do projeto está correta\"\"\"\n    required_files = [\n        'config/settings.py',\n        'config/field_mappings.yaml',\n        'ocr/processor.py',\n        'ocr/models.py',\n        'ocr/normalizer.py',\n        'services.py',\n        'utils.py',\n        'requirements.txt'\n    ]\n    \n    missing_files = []\n    for file_path in required_files:\n        if not (project_root / file_path).exists():\n            missing_files.append(file_path)\n    \n    if missing_files:\n        print(\"❌ Arquivos obrigatórios não encontrados:\")\n        for file_path in missing_files:\n            print(f\"   • {file_path}\")\n        print(\"\\n🔧 Certifique-se de que todos os arquivos do projeto estão presentes.\")\n        return False\n    \n    return True\n\n\ndef process_images(processor: OCRProcessor):\n    \"\"\"Processa imagens no diretório de entrada\"\"\"\n    print(\"\\n🔄 Processando imagens...\")\n\n    # Verifica se há imagens\n    images = processor.files.list_images(settings.INPUT_DIR)\n    if not images:\n        print(f\"\\n⚠️ Nenhuma imagem encontrada em {settings.INPUT_DIR}\")\n        print(f\"Coloque as imagens das placas na pasta '{settings.INPUT_DIR}' e tente novamente.\")\n        print(f\"Formatos suportados: {', '.join(settings.SUPPORTED_FORMATS)}\")\n        return\n\n    summary = processor.process()\n\n    if 'error' in summary:\n        print(f\"\\n❌ {summary.get('message', 'Erro no processamento')}\")\n    else:\n        print_summary(summary)\n\n        if summary.get('sucesso', 0) > 0:\n            print(f\"\\n✅ Resultados salvos em: {settings.OUTPUT_JSON}\")\n            \n            # Mostra alguns resultados\n            show_recent_results()\n\n\ndef show_recent_results(limit: int = 3):\n    \"\"\"Mostra resultados recentes\"\"\"\n    try:\n        json_files = sorted(settings.OUTPUT_JSON.glob(\"*_ocr.json\"), \n                           key=lambda x: x.stat().st_mtime, reverse=True)\n        \n        if json_files:\n            print(f\"\\n📋 Últimos {min(limit, len(json_files))} resultados:\")\n            print(\"-\" * 40)\n            \n            for json_file in json_files[:limit]:\n                try:\n                    with open(json_file, 'r', encoding='utf-8') as f:\n                        data = json.load(f)\n                    \n                    print(f\"\\n📄 {json_file.name}:\")\n                    \n                    # Mostra campos principais\n                    main_fields = ['identificacao', 'fabricante', 'categoria', 'pressao_maxima_trabalho']\n                    for field in main_fields:\n                        if field in data and data[field]:\n                            print(f\"  • {field}: {data[field]}\")\n                    \n                    # Mostra validação se disponível\n                    if '_metadata' in data and 'validacao' in data['_metadata']:\n                        val = data['_metadata']['validacao']\n                        status = \"✅\" if val.get('valid') else \"⚠️\"\n                        print(f\"  {status} Completude: {val.get('completeness', 0):.1f}%\")\n                        \n                except Exception as e:\n                    print(f\"  ❌ Erro ao ler {json_file.name}: {e}\")\n    except Exception as e:\n        print(f\"❌ Erro ao listar resultados: {e}\")\n\n\ndef process_single_image(processor: OCRProcessor):\n    \"\"\"Processa uma imagem específica\"\"\"\n    path = input(\"\\nCaminho da imagem: \").strip()\n\n    if not path:\n        print(\"❌ Caminho inválido\")\n        return\n\n    if not Path(path).exists():\n        print(f\"❌ Arquivo não encontrado: {path}\")\n        return\n\n    print(f\"\\n🔄 Processando: {path}\")\n    result = processor.process_single(path)\n\n    if result.get('success'):\n        print(\"\\n✅ Processamento concluído!\")\n\n        data = result.get('data', {})\n\n        # Mostra validação NR-13\n        if '_metadata' in data and 'validacao' in data['_metadata']:\n            val = data['_metadata']['validacao']\n            print(f\"\\n📊 Validação NR-13:\")\n            print(f\"   • Completude: {val['completeness']:.1f}%\")\n            print(f\"   • Campos obrigatórios: {len(val['found'])}/{val['total_required']}\")\n\n            if val['missing']:\n                print(f\"   • Faltando: {', '.join(val['missing'])}\")\n\n        # Mostra campos principais\n        print(\"\\n📋 Campos extraídos:\")\n        campos_mostrar = [\n            'identificacao', 'tag', 'fabricante', 'categoria',\n            'pressao_maxima_trabalho', 'ano_fabricacao'\n        ]\n\n        for campo in campos_mostrar:\n            if campo in data and data[campo]:\n                print(f\"   • {campo}: {data[campo]}\")\n\n        # Mostra campos adicionais se existirem\n        if 'outros_dados' in data and data['outros_dados']:\n            print(f\"\\n📌 Campos adicionais: {len(data['outros_dados'])}\")\n            for key, value in list(data['outros_dados'].items())[:5]:\n                print(f\"   • {key}: {value}\")\n                \n        # Mostra tempo de processamento\n        if 'processing_time' in result:\n            print(f\"\\n⏱️ Tempo: {format_time(result['processing_time'])}\")\n            \n    else:\n        print(f\"\\n❌ Erro: {result.get('error', 'Desconhecido')}\")\n\n\ndef validate_jsons():\n    \"\"\"Valida JSONs já processados\"\"\"\n    try:\n        json_files = list(settings.OUTPUT_JSON.glob(\"*_ocr.json\"))\n\n        if not json_files:\n            print(f\"\\n⚠️ Nenhum JSON encontrado em {settings.OUTPUT_JSON}\")\n            return\n\n        print(f\"\\n📊 Validando {len(json_files)} arquivos...\")\n        print(\"-\"*60)\n\n        stats = {'validos': 0, 'incompletos': 0, 'erros': 0}\n        detailed_results = []\n\n        for json_file in json_files:\n            try:\n                with open(json_file, 'r', encoding='utf-8') as f:\n                    data = json.load(f)\n\n                if '_metadata' in data and 'validacao' in data['_metadata']:\n                    val = data['_metadata']['validacao']\n                    \n                    result = {\n                        'file': json_file.name,\n                        'valid': val['valid'],\n                        'completeness': val['completeness'],\n                        'missing': val.get('missing', [])\n                    }\n                    \n                    if val['valid']:\n                        print(f\"✅ {json_file.name}: {val['completeness']:.1f}% completo\")\n                        stats['validos'] += 1\n                    else:\n                        missing = ', '.join(val['missing'])\n                        print(f\"⚠️  {json_file.name}: Faltam: {missing}\")\n                        stats['incompletos'] += 1\n                        \n                    detailed_results.append(result)\n                else:\n                    # Tenta validar manualmente\n                    val = validate_nr13_result(data)\n                    \n                    result = {\n                        'file': json_file.name,\n                        'valid': val['valid'],\n                        'completeness': val['completeness'],\n                        'missing': val.get('missing', [])\n                    }\n                    \n                    if val['valid']:\n                        print(f\"✅ {json_file.name}: Válido\")\n                        stats['validos'] += 1\n                    else:\n                        print(f\"⚠️  {json_file.name}: Incompleto\")\n                        stats['incompletos'] += 1\n                        \n                    detailed_results.append(result)\n\n            except Exception as e:\n                print(f\"❌ {json_file.name}: Erro - {e}\")\n                stats['erros'] += 1\n\n        print(\"-\"*60)\n        print(f\"📈 Resumo: {stats['validos']} válidos, {stats['incompletos']} incompletos, {stats['erros']} erros\")\n        \n        # Mostra estatísticas mais detalhadas\n        if detailed_results:\n            total_valid = len([r for r in detailed_results if r['valid']])\n            avg_completeness = sum(r['completeness'] for r in detailed_results) / len(detailed_results)\n            print(f\"📊 Taxa de sucesso: {total_valid/len(detailed_results)*100:.1f}%\")\n            print(f\"📊 Completude média: {avg_completeness:.1f}%\")\n    except Exception as e:\n        print(f\"❌ Erro na validação: {e}\")\n\n\ndef show_batch_history():\n    \"\"\"Mostra histórico de jobs batch\"\"\"\n    try:\n        batch_manager = BatchManager()\n        jobs = batch_manager.list_jobs(limit=10)\n\n        if not jobs:\n            print(\"\\n⚠️ Nenhum job batch encontrado\")\n            return\n\n        print(f\"\\n📦 Histórico de Jobs Batch ({len(jobs)} jobs)\")\n        print(\"-\"*60)\n\n        # Ordena por data de criação (mais recente primeiro)\n        sorted_jobs = sorted(jobs.items(),\n                            key=lambda x: x[1].get('created_at', ''),\n                            reverse=True)\n\n        for job_id, info in sorted_jobs:\n            print(f\"\\n🔹 Job: {job_id[:12]}...\")\n            print(f\"   Status: {info.get('status', 'desconhecido')}\")\n            print(f\"   Criado: {info.get('created_at', 'N/A')}\")\n            print(f\"   Imagens: {info.get('total_images', 'N/A')}\")\n\n            if 'results_count' in info:\n                print(f\"   Resultados: {info['results_count']}\")\n                \n            if info.get('status') == 'completed':\n                print(f\"   ✅ Concluído\")\n            elif info.get('status') == 'failed':\n                print(f\"   ❌ Falhou\")\n            elif info.get('status') in ['created', 'running']:\n                print(f\"   ⏳ Em andamento\")\n    except Exception as e:\n        print(f\"❌ Erro ao carregar histórico: {e}\")\n\n\ndef show_reports():\n    \"\"\"Mostra relatórios disponíveis\"\"\"\n    try:\n        reports = list(settings.OUTPUT_REPORTS.glob(\"resumo_*.json\"))\n\n        if not reports:\n            print(\"\\n⚠️ Nenhum relatório encontrado\")\n            return\n\n        print(f\"\\n📊 Últimos Relatórios\")\n        print(\"-\"*60)\n\n        # Ordena por data (mais recente primeiro)\n        reports_sorted = sorted(reports, key=lambda x: x.stat().st_mtime, reverse=True)\n\n        for report in reports_sorted[:10]:\n            try:\n                with open(report, 'r', encoding='utf-8') as f:\n                    data = json.load(f)\n\n                timestamp = data.get('timestamp', 'N/A')\n                total = data.get('total_imagens', 0)\n                sucesso = data.get('sucesso', 0)\n                taxa = data.get('taxa_sucesso', 0)\n                modo = data.get('modo', 'N/A')\n                tempo = data.get('tempo_total')\n\n                print(f\"\\n📄 {report.name}\")\n                print(f\"   Data: {timestamp[:19] if timestamp != 'N/A' else 'N/A'}\")\n                print(f\"   Total: {total} | Sucesso: {sucesso} | Taxa: {taxa:.1f}%\")\n                print(f\"   Modo: {modo.upper() if modo != 'N/A' else 'N/A'}\")\n                \n                if tempo:\n                    print(f\"   Tempo: {format_time(tempo)}\")\n\n            except Exception as e:\n                print(f\"\\n📄 {report.name} (erro ao ler: {e})\")\n    except Exception as e:\n        print(f\"❌ Erro ao carregar relatórios: {e}\")\n\n\ndef show_settings():\n    \"\"\"Mostra configurações atuais\"\"\"\n    print(\"\\n⚙️  CONFIGURAÇÕES ATUAIS\")\n    print(\"-\"*60)\n\n    print(\"\\n🔧 Processamento:\")\n    print(f\"   • Modelo: {settings.MISTRAL_MODEL}\")\n    print(f\"   • Threshold Batch: {settings.BATCH_THRESHOLD} imagens\")\n    print(f\"   • Tamanho Máx Batch: {settings.MAX_BATCH_SIZE}\")\n    print(f\"   • Timeout: {format_time(settings.MAX_WAIT_TIME)}\")\n    print(f\"   • Similaridade: {settings.SIMILARITY_THRESHOLD * 100:.0f}%\")\n    print(f\"   • Temperature: {settings.TEMPERATURE}\")\n    print(f\"   • Max Tokens: {settings.MAX_TOKENS}\")\n\n    print(\"\\n📁 Diretórios:\")\n    print(f\"   • Input: {settings.INPUT_DIR}\")\n    print(f\"   • Output JSON: {settings.OUTPUT_JSON}\")\n    print(f\"   • Output Batch: {settings.OUTPUT_BATCH}\")\n    print(f\"   • Logs: {settings.LOGS_DIR}\")\n\n    print(\"\\n📄 Formatos suportados:\")\n    print(f\"   {', '.join(settings.SUPPORTED_FORMATS)}\")\n\n    print(\"\\n✅ Campos obrigatórios NR-13:\")\n    for field in settings.REQUIRED_FIELDS:\n        print(f\"   • {field}\")\n        \n    # Mostra info do ambiente\n    try:\n        env_info = settings.get_env_info()\n        print(\"\\n🌍 Ambiente:\")\n        print(f\"   • API Key configurada: {'✅' if env_info['api_key_configured'] else '❌'}\")\n        print(f\"   • Diretórios existem: {'✅' if env_info['directories_exist'] else '❌'}\")\n    except Exception as e:\n        print(f\"\\n❌ Erro ao verificar ambiente: {e}\")\n\n\ndef test_connection(processor: OCRProcessor):\n    \"\"\"Testa conexão com a API\"\"\"\n    print(\"\\n🔍 Testando conexão com Mistral AI...\")\n    \n    try:\n        if processor.test_api_connection():\n            print(\"✅ Conexão com API estabelecida com sucesso!\")\n            print(f\"   • Modelo: {settings.MISTRAL_MODEL}\")\n            print(f\"   • Endpoint: https://api.mistral.ai\")\n        else:\n            print(\"❌ Falha na conexão com a API\")\n            print(\"   • Verifique sua MISTRAL_API_KEY\")\n            print(\"   • Verifique sua conexão com internet\")\n    except Exception as e:\n        print(f\"❌ Erro no teste: {e}\")\n\n\ndef show_statistics(processor: OCRProcessor):\n    \"\"\"Mostra estatísticas do sistema\"\"\"\n    print(\"\\n📈 ESTATÍSTICAS DO SISTEMA\")\n    print(\"-\"*60)\n    \n    try:\n        stats = processor.get_stats()\n        \n        print(\"\\n🔧 Processador:\")\n        print(f\"   • Imagens processadas: {stats['processed_count']}\")\n        print(f\"   • Erros: {stats['error_count']}\")\n        print(f\"   • Taxa de sucesso: {stats['success_rate']:.1f}%\")\n        \n        print(\"\\n🗂️  Normalizador:\")\n        norm_stats = stats['normalizer_stats']\n        print(f\"   • Mapeamentos predefinidos: {norm_stats['total_predefined']}\")\n        print(f\"   • Mapeamentos aprendidos: {norm_stats['total_learned']}\")\n        print(f\"   • Threshold similaridade: {norm_stats['threshold']*100:.0f}%\")\n        \n        if norm_stats['learned_fields']:\n            print(f\"   • Campos aprendidos: {', '.join(norm_stats['learned_fields'][:5])}\")\n        \n        print(\"\\n📦 Batch Manager:\")\n        batch_stats = stats['batch_stats']\n        print(f\"   • Total jobs: {batch_stats['total_jobs']}\")\n        \n        if batch_stats['status_breakdown']:\n            print(\"   • Status breakdown:\")\n            for status, count in batch_stats['status_breakdown'].items():\n                print(f\"     - {status}: {count}\")\n        \n        # Estatísticas de arquivos\n        print(\"\\n📁 Arquivos:\")\n        json_files = list(settings.OUTPUT_JSON.glob(\"*_ocr.json\"))\n        batch_files = list(settings.OUTPUT_BATCH.glob(\"*.jsonl\"))\n        reports = list(settings.OUTPUT_REPORTS.glob(\"*.json\"))\n        \n        print(f\"   • JSONs processados: {len(json_files)}\")\n        print(f\"   • Arquivos batch: {len(batch_files)}\")\n        print(f\"   • Relatórios: {len(reports)}\")\n        \n    except Exception as e:\n        print(f\"❌ Erro ao obter estatísticas: {e}\")\n\n\ndef main():\n    \"\"\"Função principal\"\"\"\n    try:\n        # Verificações iniciais\n        print(\"🔍 Verificando estrutura do projeto...\")\n        if not check_project_structure():\n            sys.exit(1)\n        \n        print(\"✅ Estrutura do projeto OK\")\n        \n        # Valida configurações\n        print(\"🔍 Validando configurações...\")\n        settings.validate()\n        print(\"✅ Configurações OK\")\n        \n        logger.info(\"Sistema NR13 OCR iniciado\")\n\n        # Inicializa processador\n        print(\"🔍 Inicializando processador OCR...\")\n        processor = OCRProcessor()\n        print(\"✅ Processador inicializado\")\n\n        while True:\n            print_banner()\n            print_menu()\n\n            choice = input(\"\\nEscolha uma opção (1-9): \").strip()\n\n            if choice == \"1\":\n                process_images(processor)\n                input(\"\\nPressione Enter para continuar...\")\n\n            elif choice == \"2\":\n                process_single_image(processor)\n                input(\"\\nPressione Enter para continuar...\")\n\n            elif choice == \"3\":\n                validate_jsons()\n                input(\"\\nPressione Enter para continuar...\")\n\n            elif choice == \"4\":\n                show_batch_history()\n                input(\"\\nPressione Enter para continuar...\")\n\n            elif choice == \"5\":\n                show_reports()\n                input(\"\\nPressione Enter para continuar...\")\n\n            elif choice == \"6\":\n                show_settings()\n                input(\"\\nPressione Enter para continuar...\")\n                \n            elif choice == \"7\":\n                test_connection(processor)\n                input(\"\\nPressione Enter para continuar...\")\n                \n            elif choice == \"8\":\n                show_statistics(processor)\n                input(\"\\nPressione Enter para continuar...\")\n\n            elif choice == \"9\":\n                if ask_confirmation(\"Deseja realmente sair?\"):\n                    print(\"\\n👋 Encerrando sistema...\")\n                    break\n\n            else:\n                print(\"\\n⚠️ Opção inválida!\")\n                input(\"\\nPressione Enter para continuar...\")\n\n    except KeyboardInterrupt:\n        print(\"\\n\\n👋 Sistema interrompido pelo usuário\")\n        logger.info(\"Sistema interrompido pelo usuário\")\n\n    except ValueError as e:\n        logger.error(f\"Erro de configuração: {e}\")\n        print(f\"\\n❌ Erro de configuração: {e}\")\n        print(\"\\n🔧 Soluções:\")\n        print(\"1. Verifique o arquivo .env\")\n        print(\"2. Configure sua MISTRAL_API_KEY\")\n        print(\"3. Execute: cp .env.example .env\")\n        \n        # Mostra informações de debug\n        print(\"\\n🔍 Informações de debug:\")\n        try:\n            sys_info = get_system_info()\n            print(f\"   • Python: {sys_info['python_version'].split()[0]}\")\n            print(f\"   • Diretório: {sys_info['working_directory']}\")\n            print(f\"   • Projeto: {project_root}\")\n        except Exception:\n            print(f\"   • Diretório do projeto: {project_root}\")\n            print(f\"   • Python: {sys.version.split()[0]}\")\n            \n        sys.exit(1)\n\n    except Exception as e:\n        logger.error(f\"Erro fatal: {e}\", exc_info=True)\n        print(f\"\\n❌ Erro fatal: {e}\")\n        print(\"\\n🔧 Soluções:\")\n        print(\"1. Verifique o arquivo de log para mais detalhes\")\n        print(\"2. Reinstale as dependências: pip install -r requirements.txt\")\n        print(\"3. Verifique se todos os arquivos estão presentes\")\n        print(f\"4. Verifique se está no diretório correto: {project_root}\")\n        sys.exit(1)\n\n\nif __name__ == \"__main__\":\n    main()\n
+#!/usr/bin/env python3
+"""
+Sistema OCR para Placas NR-13
+Entry point principal
+"""
+import sys
+import json
+import os
+from pathlib import Path
+
+# Adiciona diretório raiz ao path para imports
+project_root = Path(__file__).parent.absolute()
+sys.path.insert(0, str(project_root))
+
+# Agora importa os módulos do projeto
+try:
+    from config.settings import settings
+    from ocr.processor import OCRProcessor
+    from ocr.models import PlacaNR13
+    from services import BatchManager
+    from utils import (
+        get_logger, print_banner, print_summary, ask_confirmation,
+        validate_nr13_result, format_time, get_system_info
+    )
+except ImportError as e:
+    print(f"❌ Erro ao importar módulos: {e}")
+    print("\n🔧 Soluções possíveis:")
+    print("1. Verifique se está no diretório correto do projeto")
+    print("2. Execute: pip install -r requirements.txt")
+    print("3. Ative o ambiente virtual se estiver usando")
+    print("4. Verifique se todos os arquivos .py estão presentes")
+    print("5. Execute: python setup.py")
+    print(f"6. Diretório atual: {Path.cwd()}")
+    print(f"7. Diretório do projeto: {Path(__file__).parent.absolute()}")
+    sys.exit(1)
+
+logger = get_logger(__name__)
+
+
+def print_menu():
+    """Imprime menu principal"""
+    print(f"\n📊 Modo Híbrido Inteligente:")
+    print(f"   • 1-{settings.BATCH_THRESHOLD}: Processamento Síncrono")
+    print(f"   • >{settings.BATCH_THRESHOLD}: Batch API (50% desconto)")
+    print("\n" + "-"*60)
+    print("\n1. Processar imagens (automático)")
+    print("2. Processar imagem específica")
+    print("3. Validar JSONs processados")
+    print("4. Ver histórico de jobs batch")
+    print("5. Ver relatórios")
+    print("6. Configurações")
+    print("7. Teste de conexão")
+    print("8. Estatísticas")
+    print("9. Sair")
+    print("-"*60)
+
+
+def check_project_structure():
+    """Verifica se a estrutura do projeto está correta"""
+    required_files = [
+        'config/settings.py',
+        'config/field_mappings.yaml',
+        'ocr/processor.py',
+        'ocr/models.py',
+        'ocr/normalizer.py',
+        'services.py',
+        'utils.py',
+        'requirements.txt'
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not (project_root / file_path).exists():
+            missing_files.append(file_path)
+    
+    if missing_files:
+        print("❌ Arquivos obrigatórios não encontrados:")
+        for file_path in missing_files:
+            print(f"   • {file_path}")
+        print("\n🔧 Certifique-se de que todos os arquivos do projeto estão presentes.")
+        print("💡 Execute: python setup.py")
+        return False
+    
+    return True
+
+
+def process_images(processor: OCRProcessor):
+    """Processa imagens no diretório de entrada"""
+    print("\n🔄 Processando imagens...")
+
+    # Verifica se há imagens
+    images = processor.files.list_images(settings.INPUT_DIR)
+    if not images:
+        print(f"\n⚠️ Nenhuma imagem encontrada em {settings.INPUT_DIR}")
+        print(f"Coloque as imagens das placas na pasta '{settings.INPUT_DIR}' e tente novamente.")
+        print(f"Formatos suportados: {', '.join(settings.SUPPORTED_FORMATS)}")
+        return
+
+    summary = processor.process()
+
+    if 'error' in summary:
+        print(f"\n❌ {summary.get('message', 'Erro no processamento')}")
+    else:
+        print_summary(summary)
+
+        if summary.get('sucesso', 0) > 0:
+            print(f"\n✅ Resultados salvos em: {settings.OUTPUT_JSON}")
+            
+            # Mostra alguns resultados
+            show_recent_results()
+
+
+def show_recent_results(limit: int = 3):
+    """Mostra resultados recentes"""
+    try:
+        json_files = sorted(settings.OUTPUT_JSON.glob("*_ocr.json"), 
+                           key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        if json_files:
+            print(f"\n📋 Últimos {min(limit, len(json_files))} resultados:")
+            print("-" * 40)
+            
+            for json_file in json_files[:limit]:
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    
+                    print(f"\n📄 {json_file.name}:")
+                    
+                    # Mostra campos principais
+                    main_fields = ['identificacao', 'fabricante', 'categoria', 'pressao_maxima_trabalho']
+                    for field in main_fields:
+                        if field in data and data[field]:
+                            print(f"  • {field}: {data[field]}")
+                    
+                    # Mostra validação se disponível
+                    if '_metadata' in data and 'validacao' in data['_metadata']:
+                        val = data['_metadata']['validacao']
+                        status = "✅" if val.get('valid') else "⚠️"
+                        print(f"  {status} Completude: {val.get('completeness', 0):.1f}%")
+                        
+                except Exception as e:
+                    print(f"  ❌ Erro ao ler {json_file.name}: {e}")
+    except Exception as e:
+        print(f"❌ Erro ao listar resultados: {e}")
+
+
+def process_single_image(processor: OCRProcessor):
+    """Processa uma imagem específica"""
+    path = input("\nCaminho da imagem: ").strip()
+
+    if not path:
+        print("❌ Caminho inválido")
+        return
+
+    if not Path(path).exists():
+        print(f"❌ Arquivo não encontrado: {path}")
+        return
+
+    print(f"\n🔄 Processando: {path}")
+    result = processor.process_single(path)
+
+    if result.get('success'):
+        print("\n✅ Processamento concluído!")
+
+        data = result.get('data', {})
+
+        # Mostra validação NR-13
+        if '_metadata' in data and 'validacao' in data['_metadata']:
+            val = data['_metadata']['validacao']
+            print(f"\n📊 Validação NR-13:")
+            print(f"   • Completude: {val['completeness']:.1f}%")
+            print(f"   • Campos obrigatórios: {len(val['found'])}/{val['total_required']}")
+
+            if val['missing']:
+                print(f"   • Faltando: {', '.join(val['missing'])}")
+
+        # Mostra campos principais
+        print("\n📋 Campos extraídos:")
+        campos_mostrar = [
+            'identificacao', 'tag', 'fabricante', 'categoria',
+            'pressao_maxima_trabalho', 'ano_fabricacao'
+        ]
+
+        for campo in campos_mostrar:
+            if campo in data and data[campo]:
+                print(f"   • {campo}: {data[campo]}")
+
+        # Mostra campos adicionais se existirem
+        if 'outros_dados' in data and data['outros_dados']:
+            print(f"\n📌 Campos adicionais: {len(data['outros_dados'])}")
+            for key, value in list(data['outros_dados'].items())[:5]:
+                print(f"   • {key}: {value}")
+                
+        # Mostra tempo de processamento
+        if 'processing_time' in result:
+            print(f"\n⏱️ Tempo: {format_time(result['processing_time'])}")
+            
+    else:
+        print(f"\n❌ Erro: {result.get('error', 'Desconhecido')}")
+
+
+def validate_jsons():
+    """Valida JSONs já processados"""
+    try:
+        json_files = list(settings.OUTPUT_JSON.glob("*_ocr.json"))
+
+        if not json_files:
+            print(f"\n⚠️ Nenhum JSON encontrado em {settings.OUTPUT_JSON}")
+            return
+
+        print(f"\n📊 Validando {len(json_files)} arquivos...")
+        print("-"*60)
+
+        stats = {'validos': 0, 'incompletos': 0, 'erros': 0}
+        detailed_results = []
+
+        for json_file in json_files:
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                if '_metadata' in data and 'validacao' in data['_metadata']:
+                    val = data['_metadata']['validacao']
+                    
+                    result = {
+                        'file': json_file.name,
+                        'valid': val['valid'],
+                        'completeness': val['completeness'],
+                        'missing': val.get('missing', [])
+                    }
+                    
+                    if val['valid']:
+                        print(f"✅ {json_file.name}: {val['completeness']:.1f}% completo")
+                        stats['validos'] += 1
+                    else:
+                        missing = ', '.join(val['missing'])
+                        print(f"⚠️  {json_file.name}: Faltam: {missing}")
+                        stats['incompletos'] += 1
+                        
+                    detailed_results.append(result)
+                else:
+                    # Tenta validar manualmente
+                    val = validate_nr13_result(data)
+                    
+                    result = {
+                        'file': json_file.name,
+                        'valid': val['valid'],
+                        'completeness': val['completeness'],
+                        'missing': val.get('missing', [])
+                    }
+                    
+                    if val['valid']:
+                        print(f"✅ {json_file.name}: Válido")
+                        stats['validos'] += 1
+                    else:
+                        print(f"⚠️  {json_file.name}: Incompleto")
+                        stats['incompletos'] += 1
+                        
+                    detailed_results.append(result)
+
+            except Exception as e:
+                print(f"❌ {json_file.name}: Erro - {e}")
+                stats['erros'] += 1
+
+        print("-"*60)
+        print(f"📈 Resumo: {stats['validos']} válidos, {stats['incompletos']} incompletos, {stats['erros']} erros")
+        
+        # Mostra estatísticas mais detalhadas
+        if detailed_results:
+            total_valid = len([r for r in detailed_results if r['valid']])
+            avg_completeness = sum(r['completeness'] for r in detailed_results) / len(detailed_results)
+            print(f"📊 Taxa de sucesso: {total_valid/len(detailed_results)*100:.1f}%")
+            print(f"📊 Completude média: {avg_completeness:.1f}%")
+    except Exception as e:
+        print(f"❌ Erro na validação: {e}")
+
+
+def show_batch_history():
+    """Mostra histórico de jobs batch"""
+    try:
+        batch_manager = BatchManager()
+        jobs = batch_manager.list_jobs(limit=10)
+
+        if not jobs:
+            print("\n⚠️ Nenhum job batch encontrado")
+            return
+
+        print(f"\n📦 Histórico de Jobs Batch ({len(jobs)} jobs)")
+        print("-"*60)
+
+        # Ordena por data de criação (mais recente primeiro)
+        sorted_jobs = sorted(jobs.items(),
+                            key=lambda x: x[1].get('created_at', ''),
+                            reverse=True)
+
+        for job_id, info in sorted_jobs:
+            print(f"\n🔹 Job: {job_id[:12]}...")
+            print(f"   Status: {info.get('status', 'desconhecido')}")
+            print(f"   Criado: {info.get('created_at', 'N/A')}")
+            print(f"   Imagens: {info.get('total_images', 'N/A')}")
+
+            if 'results_count' in info:
+                print(f"   Resultados: {info['results_count']}")
+                
+            if info.get('status') == 'completed':
+                print(f"   ✅ Concluído")
+            elif info.get('status') == 'failed':
+                print(f"   ❌ Falhou")
+            elif info.get('status') in ['created', 'running']:
+                print(f"   ⏳ Em andamento")
+    except Exception as e:
+        print(f"❌ Erro ao carregar histórico: {e}")
+
+
+def show_reports():
+    """Mostra relatórios disponíveis"""
+    try:
+        reports = list(settings.OUTPUT_REPORTS.glob("resumo_*.json"))
+
+        if not reports:
+            print("\n⚠️ Nenhum relatório encontrado")
+            return
+
+        print(f"\n📊 Últimos Relatórios")
+        print("-"*60)
+
+        # Ordena por data (mais recente primeiro)
+        reports_sorted = sorted(reports, key=lambda x: x.stat().st_mtime, reverse=True)
+
+        for report in reports_sorted[:10]:
+            try:
+                with open(report, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                timestamp = data.get('timestamp', 'N/A')
+                total = data.get('total_imagens', 0)
+                sucesso = data.get('sucesso', 0)
+                taxa = data.get('taxa_sucesso', 0)
+                modo = data.get('modo', 'N/A')
+                tempo = data.get('tempo_total')
+
+                print(f"\n📄 {report.name}")
+                print(f"   Data: {timestamp[:19] if timestamp != 'N/A' else 'N/A'}")
+                print(f"   Total: {total} | Sucesso: {sucesso} | Taxa: {taxa:.1f}%")
+                print(f"   Modo: {modo.upper() if modo != 'N/A' else 'N/A'}")
+                
+                if tempo:
+                    print(f"   Tempo: {format_time(tempo)}")
+
+            except Exception as e:
+                print(f"\n📄 {report.name} (erro ao ler: {e})")
+    except Exception as e:
+        print(f"❌ Erro ao carregar relatórios: {e}")
+
+
+def show_settings():
+    """Mostra configurações atuais"""
+    print("\n⚙️  CONFIGURAÇÕES ATUAIS")
+    print("-"*60)
+
+    print("\n🔧 Processamento:")
+    print(f"   • Modelo: {settings.MISTRAL_MODEL}")
+    print(f"   • Threshold Batch: {settings.BATCH_THRESHOLD} imagens")
+    print(f"   • Tamanho Máx Batch: {settings.MAX_BATCH_SIZE}")
+    print(f"   • Timeout: {format_time(settings.MAX_WAIT_TIME)}")
+    print(f"   • Similaridade: {settings.SIMILARITY_THRESHOLD * 100:.0f}%")
+    print(f"   • Temperature: {settings.TEMPERATURE}")
+    print(f"   • Max Tokens: {settings.MAX_TOKENS}")
+
+    print("\n📁 Diretórios:")
+    print(f"   • Input: {settings.INPUT_DIR}")
+    print(f"   • Output JSON: {settings.OUTPUT_JSON}")
+    print(f"   • Output Batch: {settings.OUTPUT_BATCH}")
+    print(f"   • Logs: {settings.LOGS_DIR}")
+
+    print("\n📄 Formatos suportados:")
+    print(f"   {', '.join(settings.SUPPORTED_FORMATS)}")
+
+    print("\n✅ Campos obrigatórios NR-13:")
+    for field in settings.REQUIRED_FIELDS:
+        print(f"   • {field}")
+        
+    # Mostra info do ambiente
+    try:
+        env_info = settings.get_env_info()
+        print("\n🌍 Ambiente:")
+        print(f"   • API Key configurada: {'✅' if env_info['api_key_configured'] else '❌'}")
+        print(f"   • Diretórios existem: {'✅' if env_info['directories_exist'] else '❌'}")
+    except Exception as e:
+        print(f"\n❌ Erro ao verificar ambiente: {e}")
+
+
+def test_connection(processor: OCRProcessor):
+    """Testa conexão com a API"""
+    print("\n🔍 Testando conexão com Mistral AI...")
+    
+    try:
+        if processor.test_api_connection():
+            print("✅ Conexão com API estabelecida com sucesso!")
+            print(f"   • Modelo: {settings.MISTRAL_MODEL}")
+            print(f"   • Endpoint: https://api.mistral.ai")
+        else:
+            print("❌ Falha na conexão com a API")
+            print("   • Verifique sua MISTRAL_API_KEY")
+            print("   • Verifique sua conexão com internet")
+    except Exception as e:
+        print(f"❌ Erro no teste: {e}")
+
+
+def show_statistics(processor: OCRProcessor):
+    """Mostra estatísticas do sistema"""
+    print("\n📈 ESTATÍSTICAS DO SISTEMA")
+    print("-"*60)
+    
+    try:
+        stats = processor.get_stats()
+        
+        print("\n🔧 Processador:")
+        print(f"   • Imagens processadas: {stats['processed_count']}")
+        print(f"   • Erros: {stats['error_count']}")
+        print(f"   • Taxa de sucesso: {stats['success_rate']:.1f}%")
+        
+        print("\n🗂️  Normalizador:")
+        norm_stats = stats['normalizer_stats']
+        print(f"   • Mapeamentos predefinidos: {norm_stats['total_predefined']}")
+        print(f"   • Mapeamentos aprendidos: {norm_stats['total_learned']}")
+        print(f"   • Threshold similaridade: {norm_stats['threshold']*100:.0f}%")
+        
+        if norm_stats['learned_fields']:
+            print(f"   • Campos aprendidos: {', '.join(norm_stats['learned_fields'][:5])}")
+        
+        print("\n📦 Batch Manager:")
+        batch_stats = stats['batch_stats']
+        print(f"   • Total jobs: {batch_stats['total_jobs']}")
+        
+        if batch_stats['status_breakdown']:
+            print("   • Status breakdown:")
+            for status, count in batch_stats['status_breakdown'].items():
+                print(f"     - {status}: {count}")
+        
+        # Estatísticas de arquivos
+        print("\n📁 Arquivos:")
+        json_files = list(settings.OUTPUT_JSON.glob("*_ocr.json"))
+        batch_files = list(settings.OUTPUT_BATCH.glob("*.jsonl"))
+        reports = list(settings.OUTPUT_REPORTS.glob("*.json"))
+        
+        print(f"   • JSONs processados: {len(json_files)}")
+        print(f"   • Arquivos batch: {len(batch_files)}")
+        print(f"   • Relatórios: {len(reports)}")
+        
+    except Exception as e:
+        print(f"❌ Erro ao obter estatísticas: {e}")
+
+
+def main():
+    """Função principal"""
+    try:
+        # Verificações iniciais
+        print("🔍 Verificando estrutura do projeto...")
+        if not check_project_structure():
+            print("\n💡 Dica: Execute 'python setup.py' para configurar automaticamente")
+            sys.exit(1)
+        
+        print("✅ Estrutura do projeto OK")
+        
+        # Valida configurações
+        print("🔍 Validando configurações...")
+        settings.validate()
+        print("✅ Configurações OK")
+        
+        logger.info("Sistema NR13 OCR iniciado")
+
+        # Inicializa processador
+        print("🔍 Inicializando processador OCR...")
+        processor = OCRProcessor()
+        print("✅ Processador inicializado")
+
+        while True:
+            print_banner()
+            print_menu()
+
+            choice = input("\nEscolha uma opção (1-9): ").strip()
+
+            if choice == "1":
+                process_images(processor)
+                input("\nPressione Enter para continuar...")
+
+            elif choice == "2":
+                process_single_image(processor)
+                input("\nPressione Enter para continuar...")
+
+            elif choice == "3":
+                validate_jsons()
+                input("\nPressione Enter para continuar...")
+
+            elif choice == "4":
+                show_batch_history()
+                input("\nPressione Enter para continuar...")
+
+            elif choice == "5":
+                show_reports()
+                input("\nPressione Enter para continuar...")
+
+            elif choice == "6":
+                show_settings()
+                input("\nPressione Enter para continuar...")
+                
+            elif choice == "7":
+                test_connection(processor)
+                input("\nPressione Enter para continuar...")
+                
+            elif choice == "8":
+                show_statistics(processor)
+                input("\nPressione Enter para continuar...")
+
+            elif choice == "9":
+                if ask_confirmation("Deseja realmente sair?"):
+                    print("\n👋 Encerrando sistema...")
+                    break
+
+            else:
+                print("\n⚠️ Opção inválida!")
+                input("\nPressione Enter para continuar...")
+
+    except KeyboardInterrupt:
+        print("\n\n👋 Sistema interrompido pelo usuário")
+        logger.info("Sistema interrompido pelo usuário")
+
+    except ValueError as e:
+        logger.error(f"Erro de configuração: {e}")
+        print(f"\n❌ Erro de configuração: {e}")
+        print("\n🔧 Soluções:")
+        print("1. Verifique o arquivo .env")
+        print("2. Configure sua MISTRAL_API_KEY")
+        print("3. Execute: cp .env.example .env")
+        print("4. Execute: python setup.py")
+        
+        # Mostra informações de debug
+        print("\n🔍 Informações de debug:")
+        try:
+            sys_info = get_system_info()
+            print(f"   • Python: {sys_info['python_version'].split()[0]}")
+            print(f"   • Diretório: {sys_info['working_directory']}")
+            print(f"   • Projeto: {project_root}")
+        except Exception:
+            print(f"   • Diretório do projeto: {project_root}")
+            print(f"   • Python: {sys.version.split()[0]}")
+            
+        sys.exit(1)
+
+    except Exception as e:
+        logger.error(f"Erro fatal: {e}", exc_info=True)
+        print(f"\n❌ Erro fatal: {e}")
+        print("\n🔧 Soluções:")
+        print("1. Verifique o arquivo de log para mais detalhes")
+        print("2. Reinstale as dependências: pip install -r requirements.txt")
+        print("3. Verifique se todos os arquivos estão presentes")
+        print("4. Execute: python setup.py")
+        print(f"5. Verifique se está no diretório correto: {project_root}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
