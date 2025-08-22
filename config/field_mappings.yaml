@@ -1,0 +1,291 @@
+# Mapeamento de campos para placas NR-13
+# Cada campo pode ter aliases, regex patterns e validações
+
+identificacao:
+  aliases:
+    - identificação
+    - identification
+    - ident.
+    - id
+    - código
+    - code
+    - tag de identificação
+    - equipment id
+    - equipment identification
+  regex:
+    - 'identifica[çc][ãa]o'
+    - 'ident\.?'
+    - 'c[óo]digo\s*(?:de\s*)?identifica'
+    - 'equipment\s*id'
+  required: true
+
+tag:
+  aliases:
+    - etiqueta
+    - label
+    - código tag
+    - tag number
+    - equipment tag
+  regex:
+    - 'tag'
+    - 'etiqueta'
+
+fabricante:
+  aliases:
+    - manufacturer
+    - fabricado por
+    - nome do fabricante
+    - empresa fabricante
+    - fab.
+    - fabric.
+    - construtor
+    - maker
+    - mfg
+    - mfr
+    - manufactured by
+    - built by
+  regex:
+    - 'fabric(?:ante|ado\s*por)'
+    - 'manufact(?:urer|ured\s*by)'
+    - 'built\s*by'
+  required: true
+
+numero_serie:
+  aliases:
+    - número de série
+    - numero de serie
+    - serial number
+    - serial n°
+    - n° serial
+    - n° de série
+    - nº série
+    - ns
+    - s/n
+    - sn
+    - série
+    - serial
+  regex:
+    - 'n[úu]m(?:ero)?\s*(?:de\s*)?s[ée]rie'
+    - 's(?:erial)?\s*n(?:umber|º|°)?'
+    - 'n[º°]\s*s(?:erial)?'
+
+numero_ordem:
+  aliases:
+    - número de ordem
+    - numero de ordem
+    - ordem
+    - order number
+    - n° ordem
+    - no. ordem
+    - work order
+    - ordem de fabricação
+  regex:
+    - 'n[úu]m(?:ero)?\s*(?:de\s*)?ordem'
+    - 'ordem'
+    - 'order\s*n'
+  required: true
+
+ano_fabricacao:
+  aliases:
+    - ano de fabricação
+    - ano fabricação
+    - ano fabr.
+    - year
+    - manufacture year
+    - ano
+    - year of manufacture
+    - data de fabricação
+  regex:
+    - 'ano\s*(?:de\s*)?fabr'
+    - 'year'
+    - 'ano'
+    - 'data\s*(?:de\s*)?fabr'
+
+tipo:
+  aliases:
+    - type
+    - modelo
+    - model
+    - equipment type
+  regex:
+    - 'tipo'
+    - 'type'
+    - 'model'
+
+tipo_combustivel:
+  aliases:
+    - combustível
+    - fuel type
+    - tipo de combustível
+    - combustivel
+    - lenha em toras
+    - óleo combustível
+    - gás natural
+  regex:
+    - 'combust[íi]vel'
+    - 'fuel'
+    - 'lenha'
+    - '[óo]leo'
+    - 'g[áa]s'
+
+pressao_maxima_trabalho:
+  aliases:
+    - pmta
+    - pressão máxima de trabalho
+    - pressao maxima trabalho
+    - pressão máx. trabalho
+    - press. max. trab.
+    - p.m.t.a
+    - pressão trabalho admissível
+    - pressão admissível
+    - maximum working pressure
+    - max working pressure
+    - mwp
+    - allowable working pressure
+  regex:
+    - 'p(?:ress[ãa]o)?\s*m[áa]x(?:ima)?\s*(?:de\s*)?trab'
+    - 'pmta'
+    - 'max(?:imum)?\s*work(?:ing)?\s*press'
+    - 'allowable\s*work(?:ing)?\s*press'
+  units: ['kgf/cm²', 'bar', 'psi', 'kpa', 'mpa', 'kg/cm²']
+  required: true
+
+pressao_teste_hidrostatico:
+  aliases:
+    - pth
+    - pressão teste hidrostático
+    - pressao teste hidrostatico
+    - test pressure
+    - hydrostatic test
+    - pressão de teste hidrostático
+    - hydrostatic test pressure
+  regex:
+    - 'test.*hidr'
+    - 'pth'
+    - 'hidrost[áa]tic'
+    - 'teste\s*hidr'
+  units: ['kgf/cm²', 'bar', 'psi', 'kpa', 'mpa', 'kg/cm²']
+
+pressao_operacao:
+  aliases:
+    - pressão de operação
+    - pressao operacao
+    - operating pressure
+    - press. oper.
+    - pressão operação
+    - design pressure
+  regex:
+    - 'press.*oper'
+    - 'operating.*press'
+    - 'design.*press'
+  units: ['kgf/cm²', 'bar', 'psi', 'kpa', 'mpa', 'kg/cm²']
+
+categoria:
+  aliases:
+    - category
+    - cat.
+    - classe
+    - class
+    - categoria nr13
+    - nr-13 category
+  regex:
+    - 'categor[ií]a'
+    - 'cat\.'
+    - 'classe'
+  valid_values: ['I', 'II', 'III', 'IV', 'V', 'A', 'B', 'C', 'D', 'E']
+  required: true
+
+capacidade_producao_vapor:
+  aliases:
+    - capacidade produção vapor
+    - steam capacity
+    - capacidade vapor
+    - produção vapor
+    - capacidade de produção de vapor
+    - steam generation capacity
+  regex:
+    - 'capac.*vapor'
+    - 'produ[çc][ãa]o.*vapor'
+    - 'steam.*capac'
+    - 'steam.*generation'
+  units: ['kg/h', 't/h', 'ton/h', 'kg/hr']
+
+area_superficie_aquecimento:
+  aliases:
+    - área superfície aquecimento
+    - heating surface
+    - superfície aquecimento
+    - área aquecimento
+    - area de superficie de aquecimento
+    - heating surface area
+  regex:
+    - '[áa]rea.*aquec'
+    - 'superf[íi]cie.*aquec'
+    - 'heating.*surface'
+  units: ['m²', 'm2']
+
+volume:
+  aliases:
+    - volume total
+    - capacity
+    - capacidade
+    - internal volume
+  regex:
+    - 'volume'
+    - 'capac(?:idade|ity)'
+  units: ['l', 'm³', 'm3', 'litros', 'liters']
+
+material_casco:
+  aliases:
+    - material do casco
+    - shell material
+    - casco
+    - material casco
+  regex:
+    - 'material.*casco'
+    - 'casco'
+    - 'shell.*material'
+
+material_espelhos:
+  aliases:
+    - material dos espelhos
+    - mirror material
+    - espelhos
+    - head material
+  regex:
+    - 'material.*espelhos'
+    - 'espelhos'
+    - 'mirror.*material'
+    - 'head.*material'
+
+codigo_projeto:
+  aliases:
+    - código de projeto
+    - project code
+    - código projeto
+    - project number
+    - código de projeto / ano de edição
+    - asme bpvc sec.1/2019
+    - design code
+    - construction code
+  regex:
+    - 'c[óo]d.*projeto'
+    - 'project.*code'
+    - 'asme'
+    - 'design.*code'
+    - 'construction.*code'
+
+empresa_inspecao:
+  aliases:
+    - empresa de inspeção
+    - inspection company
+    - empresa responsável
+    - inspecionado por
+    - inspected by
+    - authorized inspector
+  regex:
+    - 'empresa.*inspe'
+    - 'inspection.*company'
+    - 'inspecionado'
+    - 'inspected\s*by'
+    - 'authorized.*inspector'
