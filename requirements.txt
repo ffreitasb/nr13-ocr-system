@@ -9,9 +9,10 @@ Pillow>=10.0.0
 # Utilities
 tqdm>=4.66.0
 
-# Optional: GUI (uncomment if needed)
-# streamlit>=1.28.0
-# plotly>=5.0.0
+# GUI Streamlit (ativadas para a interface gráfica)
+streamlit>=1.28.0
+plotly>=5.0.0
+pandas>=1.5.0
 
 # Optional: Export features (uncomment if needed)
 # openpyxl>=3.1.0
