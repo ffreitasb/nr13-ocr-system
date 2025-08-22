@@ -12,6 +12,8 @@ build/
 _outros/
 deprecated/
 samples_imagens/
+input/*
+output/*
 
 # Environment
 .env
